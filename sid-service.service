@@ -1,0 +1,67 @@
+# /etc/systemd/system/sid-service.service
+# This unit file manages application
+
+[Unit]
+# Human-readable description of the service
+Description=Scientific Inquiry Digital Service
+
+# Documentation links for reference
+Documentation=https://github.com/AnasMubarakYasin/sid-service
+
+# Start after network is available
+After=network.target
+
+# Optional: Start after database is ready
+After=postgresql.service
+
+[Service]
+# Type of service startup behavior
+# simple: default, process started is the main process
+# forking: traditional daemon that forks
+# oneshot: process exits after completing task
+# notify: uses sd_notify()A to signal readiness
+Type=simple
+
+# User and group to run the service as
+User=anas
+Group=users
+
+# Working directory for the service
+WorkingDirectory=/home/anas/sid-service
+
+# Environment variables for the service
+# Environment=NODE_ENV=production
+
+# Alternative: load environment from file
+EnvironmentFile=/home/anas/sid-service/.env
+
+# The command to start the service
+ExecStart=/home/anas/sid-service/bin
+
+# Optional: commands to run before and after the main process
+# ExecStartPre=/opt/sid-service/scripts/pre-start.sh
+# ExecStartPost=/opt/sid-service/scripts/post-start.sh
+
+# Command to reload configuration
+ExecReload=/bin/kill -HUP $MAINPID
+
+# Restart policy: always, on-failure, on-abnormal, on-abort, on-watchdog
+Restart=on-failure
+
+# Time to wait before restarting
+RestartSec=10
+
+# Number of restart attempts within a time window
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+# Standard output and error handling
+StandardOutput=journal
+StandardError=journal
+
+# Syslog identifier for log messages
+SyslogIdentifier=sid-service
+
+[Install]
+# Target that should include this service
+WantedBy=multi-user.target

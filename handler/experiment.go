@@ -346,7 +346,6 @@ func (h *ExperimentLab) broadcast(msg any) {
 
 func (h *ExperimentLab) repl(ws *websocket.Conn, usr *model.User) {
 	for {
-		// ws.SetReadDeadline(time.Now().Add(5 * time.Second))
 		ws.SetReadDeadline(time.Now().Add(5 * time.Minute))
 		msg := &feature.ExperimentCollaborationMessage{}
 		e := ws.ReadJSON(msg)
