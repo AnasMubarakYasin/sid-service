@@ -22,26 +22,27 @@ func Setup(router *gin.Engine, logger *slog.Logger, features *feature.Core) {
 	subject := handler.NewSubject(features.Subject)
 	experiment := handler.NewExperiment(features.Experiment)
 
-	api := router.Group("api")
-	event := router.Group("event")
-	message := router.Group("message")
+	api := router.Group("/api")
+	event := router.Group("/event")
+	message := router.Group("/message")
 
 	router.GET("/", func(ctx *gin.Context) { ctx.JSON(200, gin.H{"message": "hello"}) })
 
-	api.POST("/user/sign-up", user.UserSignUp)
-	api.POST("/user/sign-in", user.UserSignIn)
-	api.POST("/user/sign-out", user.UserSignOut)
-	api.GET("/user/auth", user.UserAuth)
-	api.GET("/user/authz/*page", middleware.Auth(user.UserValid), user.UserAuthz)
+	{
+		api.POST("/user/sign-up", user.UserSignUp)
+		api.POST("/user/sign-in", user.UserSignIn)
+		api.POST("/user/sign-out", user.UserSignOut)
+		api.GET("/user/auth", user.UserAuth)
+		api.GET("/user/authz/*page", middleware.Auth(user.UserValid), user.UserAuthz)
+	}
 
 	{
-		group := api.Group("experiment")
-		group.Use(middleware.Auth(user.UserValid))
+		group := api.Group("/experiment", middleware.Auth(user.UserValid))
+		group.GET("/", experiment.List)
 		group.POST("/", experiment.Create)
 		group.PUT("/:id", experiment.Update)
 		group.DELETE("/:id", experiment.Delete)
 		group.GET("/:id", experiment.Get)
-		group.GET("/", experiment.List)
 
 		group.POST("/lab", experiment.CreateLab)
 		group.DELETE("/lab/:id", experiment.RemoveLab)
@@ -50,13 +51,12 @@ func Setup(router *gin.Engine, logger *slog.Logger, features *feature.Core) {
 	}
 
 	{
-		group := api.Group("subject")
-		group.Use(middleware.Auth(user.UserValid))
+		group := api.Group("/subject", middleware.Auth(user.UserValid))
+		group.GET("/", subject.List)
 		group.POST("/", subject.Create)
 		group.PUT("/:id", subject.Update)
 		group.DELETE("/:id", subject.Delete)
 		group.GET("/:id", subject.Get)
-		group.GET("/", subject.List)
 	}
 
 }
