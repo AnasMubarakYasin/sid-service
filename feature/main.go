@@ -7,14 +7,21 @@ type Core struct {
 	Profile    *Profile
 	Subject    *Subject
 	Experiment *Experiment
+	Resource   *Resource
 }
 
 func New(repository *repository.Core) *Core {
+	usr := NewUser(repository.User, repository.Profile)
+	pro := NewProfile(repository.Profile)
+	sub := NewSubject(repository.Subject)
+	exp := NewExperiment(repository.Experiment, repository.Subject, repository.User)
+
 	return &Core{
-		User:       NewUser(repository.User, repository.Profile),
-		Profile:    NewProfile(repository.Profile),
-		Subject:    NewSubject(repository.Subject),
-		Experiment: NewExperiment(repository.Experiment, repository.Subject, repository.User),
+		User:       usr,
+		Profile:    pro,
+		Subject:    sub,
+		Experiment: exp,
+		Resource:   NewResource(usr, pro, exp, sub),
 	}
 }
 

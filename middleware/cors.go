@@ -8,8 +8,8 @@ import (
 
 // CORS returns a Cross-Origin Resource Sharing middleware.
 func CORS() gin.HandlerFunc {
-	// allowedOrigin := "*"
-	allowedOrigin := "http://localhost:3000"
+	allowedOrigin := "*"
+	// allowedOrigin := "http://localhost:3000"
 	return func(c *gin.Context) {
 		// Allow requests from any origin.
 		c.Writer.Header().Set("Access-Control-Allow-Origin", allowedOrigin)

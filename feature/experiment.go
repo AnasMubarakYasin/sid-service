@@ -2,6 +2,8 @@ package feature
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log"
 	"sid/service/model"
 	"sid/service/repository"
@@ -13,17 +15,17 @@ type Experiment struct {
 	s  *repository.Subject
 	u  *repository.User
 	ch chan *ExperimentEvent
-	sb map[any]sub
+	sb map[any]esub
 }
 
 func NewExperiment(r *repository.Experiment, s *repository.Subject, u *repository.User) *Experiment {
-	o := Experiment{r, s, u, make(chan *ExperimentEvent), make(map[any]sub)}
-	r.ExperimentDeleteAll(context.TODO())
-	go o.event_loop()
-	return &o
+	Experiment := Experiment{r, s, u, make(chan *ExperimentEvent), make(map[any]esub)}
+	r.ExperimentDeleteAll(context.Background())
+	go Experiment.event_loop()
+	return &Experiment
 }
 
-type sub func(*ExperimentEvent)
+type esub func(*ExperimentEvent)
 
 type ParamCreateLabExperiment struct {
 	AdminID int64 `form:"admin_id" json:"admin_id" xml:"admin_id"`
@@ -85,10 +87,15 @@ func (f *Experiment) CreateLab(c context.Context, p *ParamCreateLabExperiment, u
 		return nil, e
 	}
 
+	// log.Printf("Experiment Created: %v", r)
+	// log.Printf("Experiment Subscriber: %v", len(f.sb))
+
 	f.ch <- &ExperimentEvent{
 		Type: "create",
 		Data: r,
 	}
+
+	// log.Printf("Experiment Event Created")
 
 	return r, nil
 }
@@ -109,7 +116,6 @@ func (f *Experiment) DeleteLab(c context.Context, eid *int64, uid *int64) (r *mo
 	}
 
 	r, e = f.r.ExperimentDelete(c, eid)
-
 	if e != nil {
 		return nil, e
 	}
@@ -122,8 +128,19 @@ func (f *Experiment) DeleteLab(c context.Context, eid *int64, uid *int64) (r *mo
 	return r, nil
 }
 
-func (f *Experiment) Collaboration(c context.Context, u *model.User, e *model.Experiment) (r *ExperimentCollaboration) {
-	return &ExperimentCollaboration{u, e, f.u, f.s}
+func (f *Experiment) Collaboration(c context.Context, u *model.User, e *model.Experiment, fe *Experiment) (r *ExperimentCollaboration) {
+	return &ExperimentCollaboration{c, u, e, fe.r, f.u, f.s}
+}
+
+func (f *Experiment) Count(c context.Context) (count int, e error) {
+
+	count, e = f.r.ExperimentCount(c)
+
+	if e != nil {
+		return count, e
+	}
+
+	return count, nil
 }
 
 func (f *Experiment) Create(c context.Context, p *ParamCreateExperiment) (r *model.Experiment, e error) {
@@ -176,20 +193,83 @@ func (f *Experiment) Get(c context.Context, id *int64) (r *model.Experiment, e e
 	return r, nil
 }
 
-func (f *Experiment) Count(c context.Context) (count int, e error) {
-
-	count, e = f.r.ExperimentCount(c)
-
+func (f *Experiment) Report(c context.Context, id *int64) (r *model.ExperimentReport, e error) {
+	re, e := f.r.ExperimentFindByID(c, id)
 	if e != nil {
-		return count, e
+		return nil, e
+	}
+	if re == nil {
+		return nil, nil
+	}
+	r = &model.ExperimentReport{
+		ID:         re.ID,
+		SubjectID:  re.SubjectID,
+		AdminIDS:   re.AdminIDS,
+		TeacherIDS: re.TeacherIDS,
+		StudentIDS: re.StudentIDS,
+		// Teachers: re.Teachers,
+		// Students: re.Students,
+		// Subject: re.Subject,
+		Image:       re.Image,
+		Title:       re.Title,
+		Description: re.Description,
+		Status:      re.Status,
+		Rules:       re.Rules,
+		Groups:      re.Groups,
+		Questions:   re.Questions,
+		Hypotesis:   re.Hypotesis,
+		// Simulation:  re.Simulation,
+		Data:        re.Data,
+		Explanation: re.Explanation,
+		CreatedAt:   re.CreatedAt,
+		UpdatedAt:   re.UpdatedAt,
 	}
 
-	return count, nil
+	teachers, e := f.u.UserFindByIDS(context.Background(), re.TeacherIDS)
+	if e != nil {
+		return nil, e
+	}
+	students, e := f.u.UserFindByIDS(context.Background(), re.StudentIDS)
+	if e != nil {
+		return nil, e
+	}
+	r.Teachers = *teachers
+	r.Students = *students
+
+	subject, e := f.s.SubjectFindByID(context.Background(), &re.SubjectID)
+	if e != nil {
+		return nil, e
+	}
+	r.Subject = *subject
+	r.Questions = re.Questions
+
+	if len(re.Hypotesis) > 0 {
+		r.Answers = re.Hypotesis
+	}
+	if len(re.Simulation) > 0 {
+		r.Simulation = re.Simulation
+	}
+	if len(re.Data) > 0 {
+		d, ok := re.Data["value"].([][]string)
+		if ok {
+			r.Collections = d
+		}
+	}
+	if len(re.Explanation) > 0 {
+		d, ok := re.Explanation["value"].(string)
+		if ok {
+			r.Conclusion = d
+		}
+	}
+
+	return r, nil
 }
 
-func (f *Experiment) Subscribe(c context.Context, s sub) (e error) {
+func (f *Experiment) Subscribe(c context.Context, s esub) (e error) {
 
 	f.sb[c] = s
+
+	log.Printf("Experiment Subscribe: %v", len(f.sb))
 
 	ct, e := f.Count(c)
 
@@ -202,15 +282,19 @@ func (f *Experiment) Subscribe(c context.Context, s sub) (e error) {
 	return nil
 }
 
-func (f *Experiment) Unsubscribe(c context.Context, s sub) (e error) {
+func (f *Experiment) Unsubscribe(c context.Context, s esub) (e error) {
 
 	delete(f.sb, c)
+
+	log.Printf("Experiment Unsubscribe: %v", len(f.sb))
 
 	return nil
 }
 
 func (f *Experiment) event_loop() {
 	for ch := range f.ch {
+		log.Printf("Experiment Event: %+v", ch)
+		log.Printf("Experiment Event Subscriber: %v %+v", len(f.sb), f.sb)
 		for _, s := range f.sb {
 			s(ch)
 		}
@@ -221,6 +305,8 @@ var (
 	ErrNotAdmin  = &Error{Code: "Not Admin", Message: "Not Admin Lab"}
 	ErrLabNExist = &Error{Code: "Not Exists", Message: "Lab Not Exists"}
 	ErrNSSubj    = &Error{Code: "Subject Not Set", Message: "Suject not set up yet"}
+	ErrFinish    = &Error{Code: "Already Finished", Message: "Experiment already Finished"}
+	ErrUpdate    = &Error{Code: "Failed Update", Message: "Failed to Save"}
 )
 
 type ExperimentEvent struct {
@@ -229,6 +315,7 @@ type ExperimentEvent struct {
 	// Data  *model.Experiment `form:"data,omitempty" json:"data,omitempty" xml:"data,omitempty"`
 	// Count int               `form:"count,omitempty" json:"count,omitempty" xml:"count,omitempty"`
 }
+
 type ExperimentGroup struct {
 	ID       int64         `form:"id" json:"id" xml:"id"`
 	Name     string        `form:"name" json:"name" xml:"name"`
@@ -251,6 +338,7 @@ type ExperimentCollaborationMessage struct {
 	Teachers    *[]model.User   `form:"teachers,omitempty" json:"teachers,omitempty" xml:"teachers,omitempty"`
 	Students    *[]model.User   `form:"students,omitempty" json:"students,omitempty" xml:"students,omitempty"`
 	Groups      *[]any          `form:"groups,omitempty" json:"groups,omitempty" xml:"groups,omitempty"`
+	Description *string         `form:"description,omitempty" json:"description,omitempty" xml:"description,omitempty"`
 	Subject     *model.Subject  `form:"subject,omitempty" json:"subject,omitempty" xml:"subject,omitempty"`
 	Status      *string         `form:"status,omitempty" json:"status,omitempty" xml:"status,omitempty"`
 	Questions   *[]string       `form:"questions,omitempty" json:"questions,omitempty" xml:"questions,omitempty"`
@@ -277,6 +365,7 @@ type ExperimentSync struct {
 	Teachers    *[]model.User   `form:"teachers,omitempty" json:"teachers,omitempty" xml:"teachers,omitempty"`
 	Students    *[]model.User   `form:"students,omitempty" json:"students,omitempty" xml:"students,omitempty"`
 	Groups      *[]any          `form:"groups,omitempty" json:"groups,omitempty" xml:"groups,omitempty"`
+	Description *string         `form:"description,omitempty" json:"description,omitempty" xml:"description,omitempty"`
 	Subject     *model.Subject  `form:"subject,omitempty" json:"subject,omitempty" xml:"subject,omitempty"`
 	Status      *string         `form:"status,omitempty" json:"status,omitempty" xml:"status,omitempty"`
 	Questions   *[]string       `form:"questions,omitempty" json:"questions,omitempty" xml:"questions,omitempty"`
@@ -287,8 +376,10 @@ type ExperimentSync struct {
 }
 
 type ExperimentCollaboration struct {
+	c  context.Context
 	u  *model.User
 	e  *model.Experiment
+	r  *repository.Experiment
 	ru *repository.User
 	rs *repository.Subject
 }
@@ -373,14 +464,14 @@ func (c *ExperimentCollaboration) DownSync(attr string) (r *ExperimentCollaborat
 		Attr: attr,
 	}
 	if attr == "all" || attr == "users" {
-		teachers, err := c.ru.UserFindByIDS(context.TODO(), c.e.TeacherIDS)
+		teachers, err := c.ru.UserFindByIDS(context.Background(), c.e.TeacherIDS)
 		if err != nil {
 			return &ExperimentCollaborationMessage{
 				Type:  "error",
 				Error: &Error{Code: "sync", Message: "failed find many t"},
 			}
 		}
-		students, err := c.ru.UserFindByIDS(context.TODO(), c.e.StudentIDS)
+		students, err := c.ru.UserFindByIDS(context.Background(), c.e.StudentIDS)
 		if err != nil {
 			return &ExperimentCollaborationMessage{
 				Type:  "error",
@@ -393,8 +484,11 @@ func (c *ExperimentCollaboration) DownSync(attr string) (r *ExperimentCollaborat
 	if attr == "all" || attr == "groups" {
 		message.Groups = &c.e.Groups
 	}
+	if attr == "all" || attr == "description" {
+		message.Description = &c.e.Description
+	}
 	if attr == "all" || attr == "subject" {
-		subject, err := c.rs.SubjectFindByID(context.TODO(), &c.e.SubjectID)
+		subject, err := c.rs.SubjectFindByID(context.Background(), &c.e.SubjectID)
 		if err != nil {
 			return &ExperimentCollaborationMessage{
 				Type:  "error",
@@ -451,12 +545,25 @@ func (c *ExperimentCollaboration) UpSync(attr string, s *ExperimentSync, u *mode
 	if attr == "all" || attr == "groups" {
 		c.e.Groups = *s.Groups
 	}
+	if attr == "all" || attr == "description" {
+		h := slices.ContainsFunc(c.e.AdminIDS, func(aid int64) bool {
+			return aid == u.ID
+		})
+		if !h {
+			r.Type = "error"
+			r.Attr = "description"
+			r.Description = &c.e.Description
+			r.Error = ErrNotAdmin
+			return r
+		}
+		c.e.Description = *s.Description
+	}
 	if attr == "all" || attr == "subject" {
 		h := slices.ContainsFunc(c.e.AdminIDS, func(aid int64) bool {
 			return aid == u.ID
 		})
 		if !h {
-			s, e := c.rs.SubjectFindByID(context.TODO(), &c.e.SubjectID)
+			s, e := c.rs.SubjectFindByID(context.Background(), &c.e.SubjectID)
 			if e != nil {
 				return &ExperimentCollaborationMessage{
 					Type:  "error",
@@ -470,6 +577,11 @@ func (c *ExperimentCollaboration) UpSync(attr string, s *ExperimentSync, u *mode
 			return r
 		}
 		c.e.SubjectID = s.Subject.ID
+	}
+	if c.e.Status == "finished" {
+		r.Type = "error"
+		r.Error = ErrFinish
+		return r
 	}
 	if attr == "all" || attr == "status" {
 		h := slices.ContainsFunc(c.e.AdminIDS, func(aid int64) bool {
@@ -488,6 +600,25 @@ func (c *ExperimentCollaboration) UpSync(attr string, s *ExperimentSync, u *mode
 			r.Status = &c.e.Status
 			r.Error = ErrNSSubj
 			return r
+		}
+		if *s.Status == "finished" {
+			ts := c.e.Status
+			c.e.Status = *s.Status
+			jsonData, err := json.MarshalIndent(c.e, "", "  ")
+			if err != nil {
+				log.Fatal(err)
+			}
+			fmt.Println("saving", string(jsonData))
+			_, e := c.r.ExperimentUpdate(context.Background(), c.e)
+			if e != nil {
+				c.e.Status = ts
+
+				r.Type = "error"
+				r.Attr = "status"
+				r.Status = &c.e.Status
+				r.Error = ErrUpdate
+				return r
+			}
 		}
 		c.e.Status = *s.Status
 	}

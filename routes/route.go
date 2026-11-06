@@ -21,6 +21,7 @@ func Setup(router *gin.Engine, logger *slog.Logger, features *feature.Core) {
 	user := handler.NewUser(features.User)
 	subject := handler.NewSubject(features.Subject)
 	experiment := handler.NewExperiment(features.Experiment)
+	resource := handler.NewResource(features.Resource)
 
 	api := router.Group("/api")
 	event := router.Group("/event")
@@ -37,12 +38,17 @@ func Setup(router *gin.Engine, logger *slog.Logger, features *feature.Core) {
 	}
 
 	{
+		event.GET("/resource", middleware.Auth(user.UserValid), resource.Event)
+	}
+
+	{
 		group := api.Group("/experiment", middleware.Auth(user.UserValid))
 		group.GET("/", experiment.List)
 		group.POST("/", experiment.Create)
 		group.PUT("/:id", experiment.Update)
 		group.DELETE("/:id", experiment.Delete)
 		group.GET("/:id", experiment.Get)
+		group.GET("/:id/report", experiment.Report)
 
 		group.POST("/lab", experiment.CreateLab)
 		group.DELETE("/lab/:id", experiment.RemoveLab)

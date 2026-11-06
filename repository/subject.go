@@ -18,6 +18,15 @@ func NewSubject(db *bun.DB) *Subject {
 	return &Subject
 }
 
+func (r *Subject) SubjectCount(ctx context.Context) (int, error) {
+	count, err := r.db.
+		NewSelect().
+		Model((*model.Subject)(nil)).
+		Count(ctx)
+
+	return count, err
+}
+
 func (r *Subject) SubjectCreate(ctx context.Context, data *model.Subject) (*model.Subject, error) {
 	res := &model.Subject{}
 	_, err := r.db.

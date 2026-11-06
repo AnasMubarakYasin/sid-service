@@ -43,7 +43,7 @@ func (h *Experiment) CreateLab(c *gin.Context) {
 		return
 	}
 
-	labs[r.ID] = newLab(h.f.Collaboration(c, usr, r))
+	labs[r.ID] = newLab(h.f.Collaboration(c, usr, r, h.f))
 
 	OK(c, r)
 }
@@ -97,7 +97,7 @@ func (h *Experiment) Collaboration(c *gin.Context) {
 
 	lab, ok := labs[p.ID]
 	if !ok {
-		log.Printf("Global Lab not used: %+v", p.ID)
+		// log.Printf("Global Lab not used: %+v", p.ID)
 		exp, e := h.f.Get(c, &p.ID)
 		if e != nil {
 			log.Printf("Lab not found: %+v", p.ID)
@@ -107,13 +107,13 @@ func (h *Experiment) Collaboration(c *gin.Context) {
 			log.Printf("Experiment not found: %+v", p.ID)
 			return
 		}
-		lab = newLab(h.f.Collaboration(c, usr, exp))
+		lab = newLab(h.f.Collaboration(c, usr, exp, h.f))
 		labs[exp.ID] = lab
 	} else {
-		log.Printf("Global Lab used: %+v", p.ID)
+		// log.Printf("Global Lab used: %+v", p.ID)
 	}
 
-	log.Printf("Collaboration: %+v", usr.ID)
+	// log.Printf("Collaboration: %+v", usr.ID)
 
 	lab.mu.Lock()
 	lab.join(ws, usr)
@@ -121,7 +121,7 @@ func (h *Experiment) Collaboration(c *gin.Context) {
 	lab.osync(ws, "all")
 	lab.mu.Unlock()
 
-	log.Printf("Synchronized: %+v", usr.ID)
+	// log.Printf("Synchronized: %+v", usr.ID)
 
 	// lab.heartbeat(ws)
 	lab.repl(ws, usr)
@@ -129,7 +129,13 @@ func (h *Experiment) Collaboration(c *gin.Context) {
 
 func (h *Experiment) Event(c *gin.Context) {
 	cr := c.Request.Context()
+	usr, e := GetUser(c)
+	if e != nil {
+		log.Printf("Failed get websocket")
+		return
+	}
 	sub := func(ev *feature.ExperimentEvent) {
+		log.Printf("Experiment Event Stream: %+v", usr)
 		p, e := json.Marshal(ev.Data)
 		if e != nil {
 			c.SSEvent("error", gin.H{"name": "parse", "message": "failed parsing"})
@@ -138,19 +144,22 @@ func (h *Experiment) Event(c *gin.Context) {
 		}
 		c.Writer.Flush()
 	}
-
 	h.f.Subscribe(c, sub)
-
-	for {
-		select {
-		case <-cr.Done():
-			h.f.Unsubscribe(c, sub)
-			return
-		case <-time.After(60 * time.Second):
-			c.SSEvent("ping", gin.H{})
-			c.Writer.Flush()
-		}
-	}
+	log.Printf("Experiment Event Stream Open: %v", usr)
+	<-cr.Done()
+	log.Printf("Experiment Event Stream End: %v", usr)
+	h.f.Unsubscribe(c, sub)
+	// for {
+	// 	select {
+	// 	case <-cr.Done():
+	// 		log.Printf("Experiment Event Stream End: %v", usr)
+	// 		h.f.Unsubscribe(c, sub)
+	// 		return
+	// 	case <-time.After(60 * time.Second):
+	// 		c.SSEvent("ping", gin.H{})
+	// 		c.Writer.Flush()
+	// 	}
+	// }
 }
 
 func (h *Experiment) Create(c *gin.Context) {
@@ -244,6 +253,26 @@ func (h *Experiment) Get(c *gin.Context) {
 
 	OK(c, r)
 }
+func (h *Experiment) Report(c *gin.Context) {
+	p := &ParamID{}
+
+	if err := c.ShouldBindUri(p); err != nil {
+		_ = c.Error(ErrBadRequest)
+		return
+	}
+
+	r, e := h.f.Report(c, &p.ID)
+
+	if e != nil {
+		Fail(c, 500, e)
+		return
+	}
+	if r == nil {
+		Fail(c, 404, ErrNotFound)
+	}
+
+	OK(c, r)
+}
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
@@ -277,13 +306,13 @@ func newLab(collab *feature.ExperimentCollaboration) *ExperimentLab {
 }
 
 func (h *ExperimentLab) join(ws *websocket.Conn, usr *model.User) {
-	log.Printf("join: %+v", usr.ID)
+	// log.Printf("join: %+v", usr.ID)
 	h.cl[ws] = usr
 	h.broadcast(h.collab.Join(usr))
 }
 
 func (h *ExperimentLab) leave(ws *websocket.Conn, usr *model.User) {
-	log.Printf("leave: %+v", usr.ID)
+	// log.Printf("leave: %+v", usr.ID)
 	h.broadcast(h.collab.Leave(usr))
 	delete(h.cl, ws)
 }
@@ -326,20 +355,20 @@ func (h *ExperimentLab) publish(ws *websocket.Conn, msg any) {
 	u := h.cl[ws]
 	delete(h.cl, ws)
 	for cl, u := range h.cl {
-		log.Printf("broadcast: %+v", u.ID)
+		log.Printf("publish: %+v", u.ID)
 		if err := cl.WriteJSON(msg); err != nil {
-			log.Printf("Broadcast error: %+v", err)
+			log.Printf("publish error: %+v", err)
 		}
 	}
 	h.cl[ws] = u
 }
 
 func (h *ExperimentLab) broadcast(msg any) {
-	log.Printf("subscribers: %+v", len(h.cl))
+	log.Printf("broadcast subs: %+v", len(h.cl))
 	for cl, u := range h.cl {
 		log.Printf("broadcast: %+v", u.ID)
 		if err := cl.WriteJSON(msg); err != nil {
-			log.Printf("Broadcast error: %+v", err)
+			log.Printf("broadcast error: %+v", err)
 		}
 	}
 }
@@ -356,13 +385,16 @@ func (h *ExperimentLab) repl(ws *websocket.Conn, usr *model.User) {
 			h.mu.Unlock()
 			break
 		}
-		log.Printf("Read: %+v", msg)
+		// log.Printf("Read: %+v", msg)
 		h.mu.Lock()
 		switch msg.Type {
 		case "sync":
 			s := &feature.ExperimentSync{}
 			if msg.Attr == "groups" {
 				s.Groups = msg.Groups
+			}
+			if msg.Attr == "description" {
+				s.Description = msg.Description
 			}
 			if msg.Attr == "subject" {
 				s.Subject = msg.Subject
